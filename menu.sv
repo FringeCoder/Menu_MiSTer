@@ -253,7 +253,7 @@ wire  [6:0] snac_user_out;
 assign snac_state = { snac_axes1, snac_pad1, snac_axes0, snac_pad0,
                       snac_id1, snac_id0 };
 
-snac_psx #(.CLK_MHZ(100), .BAUD_KHZ(250)) snac
+snac_psx #(.CLK_KHZ(100000), .BAUD_KHZ(250)) snac
 (
 	.clk(clk_sys),
 	.reset(~locked),
