@@ -65,13 +65,18 @@ localparam CONF_STR = {
 wire forced_scandoubler;
 wire [31:0] status;
 
+wire         snac_enable;
+wire [111:0] snac_state;
+
 hps_io #(.CONF_STR(CONF_STR)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
 	.forced_scandoubler(forced_scandoubler),
 	.status(status),
-	.status_menumask(cfg)
+	.status_menumask(cfg),
+	.snac_enable(snac_enable),
+	.snac_state(snac_state)
 );
 
 ////////////////////   CLOCKS   ///////////////////
@@ -232,14 +237,40 @@ end
 reg [15:0] mt32_i2s_r, mt32_i2s_l;
 wire midi_rx;
 
-assign AUDIO_L = mt32_i2s_l;
-assign AUDIO_R = mt32_i2s_r;
 assign AUDIO_S = 1;
 
-assign USER_OUT[0]   = 1;
-assign USER_OUT[1]   = UART_RXD;
-assign USER_OUT[6:2] = '1;
-assign UART_TXD      = midi_rx;
+//
+// PSX SNAC pad reader. Shares every user-port pin with MT32-pi above, so the
+// two are mutually exclusive -- selected at runtime by snac_enable.
+//
+wire [15:0] snac_pad0, snac_pad1;
+wire [31:0] snac_axes0, snac_axes1;
+wire  [7:0] snac_id0, snac_id1;
+wire  [6:0] snac_user_out;
+
+// Word 0 is status (both device IDs), then pad and axes per port. Must match the
+// word order userspace reads in snac_psx_poll().
+assign snac_state = { snac_axes1, snac_pad1, snac_axes0, snac_pad0,
+                      snac_id1, snac_id0 };
+
+snac_psx #(.CLK_KHZ(100000), .BAUD_KHZ(250)) snac
+(
+	.clk(clk_sys),
+	.reset(~locked),
+	.enable(snac_enable),
+	.user_in(USER_IN),
+	.user_out(snac_user_out),
+	.pad0(snac_pad0), .pad1(snac_pad1),
+	.axes0(snac_axes0), .axes1(snac_axes1),
+	.id0(snac_id0), .id1(snac_id1)
+);
+
+// The user port has one tenant at a time: PSX pads or MT32-pi. They collide on
+// every pin, so this is physics, not policy.
+assign USER_OUT = snac_enable ? snac_user_out : {5'b11111, UART_RXD, 1'b1};
+assign UART_TXD = snac_enable ? 1'b1 : midi_rx;
+assign AUDIO_L  = snac_enable ? 16'd0 : mt32_i2s_l;
+assign AUDIO_R  = snac_enable ? 16'd0 : mt32_i2s_r;
 
 
 //

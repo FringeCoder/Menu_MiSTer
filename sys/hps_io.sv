@@ -121,6 +121,9 @@ module hps_io #(parameter CONF_STR, CONF_STR_BRAM=0, PS2DIV=0, WIDE=0, VDNUM=1, 
 	input              status_set,
 	input       [15:0] status_menumask,
 
+	// PSX SNAC pad state, read by the OSD/menu core over UIO 'hFE.
+	input      [111:0] snac_state,
+
 	input             info_req,
 	input       [7:0] info,
 
@@ -159,6 +162,10 @@ module hps_io #(parameter CONF_STR, CONF_STR_BRAM=0, PS2DIV=0, WIDE=0, VDNUM=1, 
 	// [15]: 0 - unset, 1 - set. [1:0]: 0 - none, 1 - 32MB, 2 - 64MB, 3 - 128MB
 	// [14]: debug mode: [8]: 1 - phase up, 0 - phase down. [7:0]: amount of shift.
 	output reg [15:0] sdram_sz,
+
+	// PSX SNAC: give the user port to the pad reader (1) or leave it to MT32-pi
+	// (0), set over UIO 'hFD. Mutually exclusive -- they share every pin.
+	output reg         snac_enable = 0,
 
 	// RTC MSM6242B layout
 	output reg [64:0] RTC,
@@ -523,6 +530,21 @@ always@(posedge clk_sys) begin : uio_block
 
 				//sdram size set
 				'h31: if(byte_cnt == 1) sdram_sz <= io_din;
+
+				// PSX SNAC: give the user port to the pad reader (1) or leave it
+				// to MT32-pi (0). Mutually exclusive -- they share every pin.
+				'hFD: if(byte_cnt == 1) snac_enable <= io_din[0];
+
+				// PSX SNAC pad state. Seven words: status, then three per port.
+				'hFE: case(byte_cnt)
+							1: io_dout <= snac_state[ 15:  0];
+							2: io_dout <= snac_state[ 31: 16];
+							3: io_dout <= snac_state[ 47: 32];
+							4: io_dout <= snac_state[ 63: 48];
+							5: io_dout <= snac_state[ 79: 64];
+							6: io_dout <= snac_state[ 95: 80];
+							7: io_dout <= snac_state[111: 96];
+						endcase
 
 				// Gamma
 				'h32: gamma_en <= io_din[0];
