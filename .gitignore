@@ -37,3 +37,7 @@ c5_pin_model_dump.txt
 *.xml
 *_netlist
 *.cdf
+
+# bench build products
+rtl/sim/**/tb_snac
+rtl/sim/**/out_*.log

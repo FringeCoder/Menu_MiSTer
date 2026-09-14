@@ -1,0 +1,72 @@
+# Run the syntax gate and the RTL testbenches on every push.
+#
+# This repository had no CI at all until 2026-09-13. Nothing parsed menu.sv or
+# rtl/ before Quartus did, and rtl/snac_psx.v -- the only substantial RTL here
+# that is ours rather than upstream's -- had no bench anywhere, despite three of
+# the four commits that built it being fixes to timing-dependent behaviour.
+#
+# Add benches as they are confirmed to run rather than committing a red
+# pipeline. Every step below says why it exists and what it would catch; keep
+# that up, because a step whose purpose is not written down is a step someone
+# deletes to get a green build.
+name: rtl-sim
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      # Parse every synthesisable source standalone. Seconds of runtime, and it
+      # fails the cheap way: the alternative is finding a missing comma 18
+      # seconds into a 35-minute fit. See syntax_check.sh for what it does and
+      # does not treat as an error, and for the one documented exclusion.
+      - name: Verilog syntax gate
+        run: |
+          set -euo pipefail
+          bash syntax_check.sh
+
+      # snac_psx's ACK flow control, glitch filter and axes gate, against a pad
+      # model that answers on the real schedule -- ACK ~10 us after a byte's
+      # last clock edge, 2 us wide -- rather than instantly. That timing is the
+      # whole point: a model that answers instantly is what the original
+      # free-running reader passed against and real hardware did not.
+      #
+      # The bench is vendored alongside the module. It is canonical in the
+      # AmigaCD core; see rtl/snac_psx.vendor.
+      - name: SNAC PSX pad reader
+        run: |
+          set -euo pipefail
+          cd rtl/sim/snac_psx
+          # 100000 is what menu.sv instantiates; the other two are the rates
+          # the module is used at elsewhere. Every timing constant is an
+          # integer division of CLK_KHZ, so a rate that truncates badly would
+          # only show at that rate.
+          for khz in 28375 50000 100000; do
+            iverilog -g2012 -P tb_snac_psx.CLK_KHZ=$khz -o tb_snac \
+              ../../snac_psx.v tb_snac_psx.sv
+            vvp tb_snac | tee out_$khz.log
+            grep -q "RUN: PASS" out_$khz.log
+          done
+
+      # rtl/snac_psx.v is a copy. The AmigaCD core owns it, and a shared file
+      # with no control on it drifts silently -- both copies compile, both look
+      # right, and the difference only shows on hardware.
+      #
+      # This checks the local copy against the sha256 in rtl/snac_psx.vendor,
+      # which catches it being edited here. Catching the canonical side having
+      # moved needs a checkout of that repository, which a job here cannot get
+      # without a token; snac_vendor_check.sh does that comparison locally when
+      # you give it a path. Do NOT delete this step to get a green build.
+      - name: SNAC module matches its vendor stamp
+        run: |
+          set -euo pipefail
+          ./snac_vendor_check.sh
