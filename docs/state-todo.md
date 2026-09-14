@@ -114,6 +114,40 @@ AmigaCD core.
 
 ---
 
+## M7 — menu.rbf reaches the MiSTer by hand, and update_all overwrites it  [no code]
+
+Deploying this core is manual, and the manual step has a silent failure mode.
+
+The AmigaCD userspace repository (`FringeCoder/AmigaCD`) carries the deployment
+tooling. Its `scripts/stage-output.sh` copies this core's build —
+`upstream/core-menu/output_files/menu.rbf` — into `output/menu.rbf`, and stops
+there. **No script transfers it to the machine.** Every remote-copy site in that
+repository (`scripts/deploy-from-ci.sh:65`, `scripts/deploy-from-ci.ps1:81`,
+`scripts/wsl-build.sh:117`, `build.sh:26`) sends only the userspace binary, and
+the CI artifact those pull from contains just `MiSTer` and `MiSTer.elf`. The
+last hop for a core is a hand copy, per that repo's `docs/deployment.md:22`.
+
+The part that bites this core specifically: `menu.rbf` cannot be protected from
+`update_all`. Downloader filters are category/core level only, there is no
+per-file exclusion, and the boot menu **must** be named `menu.rbf`, so renaming
+is not available. The documented defence is two commands run by hand — keep
+`menu_snac.rbf` as a spare and restore it after every update that touches the
+Menu core.
+
+Miss that and the SNAC pad stops answering in the boot menu with a `menu.rbf`
+present and a plausible version on screen, which is a rough thing to attribute:
+it looks like the pad, or the adapter, or `snac_psx=1`, or SW[1].
+
+Also worth knowing before debugging a pad that does not answer: `snac_psx=1`
+belongs in `/media/fat/MiSTer.ini` under `[MENU]`, because `main=` matches the
+core's CONF_STR name and this core calls itself MENU. And SW[1] on the
+DE10-Nano must be OFF — it hands three user-port pins to HDMI audio and the pad
+never answers, with no error.
+
+No action here; this is recorded so it is not rediscovered as a bug. The full
+set of deployment gaps is written up in the AmigaCD repo as
+`docs/deployment-gaps.md`.
+
 ## Order
 
 1. **M2** — minutes of work, needs nothing but the repository, and it decides
@@ -123,7 +157,9 @@ AmigaCD core.
 3. **M3** — needs hardware. Do it the next time the hardware is in front of you
    rather than scheduling it.
 4. **M4** — cheap, low consequence.
-5. **M5, M6** — recorded so they are not rediscovered as bugs. Neither is work.
+5. **M5, M6, M7** — recorded so they are not rediscovered as bugs. None is work.
+   M7 is the one to reread before debugging a SNAC pad that has stopped
+   answering in the boot menu, since an `update_all` is the likeliest cause.
 
 ## What is not on this list
 
