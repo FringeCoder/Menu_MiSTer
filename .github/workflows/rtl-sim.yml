@@ -42,6 +42,26 @@ jobs:
       #
       # The bench is vendored alongside the module. It is canonical in the
       # AmigaCD core; see rtl/snac_psx.vendor.
+      #
+      # All eight checks are falsified, each against a plausible wrong
+      # implementation rather than arbitrary breakage. Three were done when the
+      # bench landed (2026-09-13): the GunCon axes gate, the ACK glitch filter,
+      # ATT setup. The other five on 2026-09-15:
+      #
+      #   idle bus       id0 <= rx_byte[1] with the 0xFF absence gate dropped
+      #                  -> FAIL absent id0: got ff want 00
+      #   digital frame  decode(rx_byte[2], rx_byte[3]) instead of [3],[4]
+      #                  -> FAIL digital pad0: got 8803 want 0010
+      #   port alternate ST_DONE commits both ports into port 0's registers
+      #                  -> FAIL port1 id1: got 00 want 41
+      #   DualShock axes bytes assembled {5,6,7,8} instead of {8,7,6,5}
+      #                  -> FAIL analog axes0: got 12345678 want 78563412
+      #   unplug clears  pad0 assigned only when present, so it stays latched
+      #                  -> FAIL unplugged pad0: got 0010 want 0000
+      #
+      # The last one is the comment in ST_DONE made executable: "every branch
+      # below always assigns a fresh value". Only the unplug check catches it,
+      # which is why it is worth having.
       - name: SNAC PSX pad reader
         run: |
           set -euo pipefail
@@ -56,6 +76,49 @@ jobs:
             vvp tb_snac | tee out_$khz.log
             grep -q "RUN: PASS" out_$khz.log
           done
+
+      # The user port has one tenant at a time, PSX pads or MT32-pi, and
+      # snac_enable can change in the middle of a poll -- at which point the
+      # reader is driving a bus it no longer owns. If it leaves ATT low or CLK
+      # parked, the MT32-pi just handed the port sees a line held down by the
+      # tenant that moved out; if it keeps its result registers, a button held
+      # at the switch stays pressed in the OSD with no pads connected.
+      #
+      # Checked on snac_psx.v rather than on menu.sv's four mux assigns: the
+      # module is what has state, and a bench that re-declared the assigns would
+      # be testing its own copy of them. Compiles the vendored bench too, only to
+      # borrow its psx_pad model; -s picks the top so tb_snac_psx is not run.
+      #
+      # Falsified 2026-09-15 against five mutations: enable gating only the START
+      # of a frame, ST_IDLE asserting ATT regardless of enable, and pad0 / axes0 /
+      # id0 each left uncleared on disable. Each fails the check that names it.
+      # The three clear checks were VACUOUS in the first version of this bench --
+      # with no pad plugged in they compared defaults against defaults and passed
+      # against a reader that cleared nothing, which is why the pad model is here
+      # and why it is a DualShock rather than a digital pad.
+      - name: SNAC user-port handover
+        run: |
+          set -euo pipefail
+          cd rtl/sim/snac_psx
+          iverilog -g2012 -s tb_snac_enable -o tb_en \
+            ../../snac_psx.v tb_snac_psx.sv tb_snac_enable.sv
+          vvp tb_en | tee out_enable.log
+          grep -q "RUN: PASS" out_enable.log
+
+      # menu.sv packs snac_state and snac_psx_poll() in FringeCoder/AmigaCD
+      # unpacks it. Nothing connects the two but the word order, and getting it
+      # wrong makes every button a different button -- which looks like a broken
+      # reader rather than a field order. Neither repository can see the other in
+      # CI, so each is pinned to the table in docs/snac-state-contract.md and a
+      # change on either side that is not also a change to that table fails where
+      # it was made. The AmigaCD repository runs the same check on its unpack.
+      #
+      # If this fails, do NOT delete it as stale: the packing has moved, and the
+      # host is about to read the fields in the wrong places.
+      - name: snac_state word order matches the contract
+        run: |
+          set -euo pipefail
+          ./snac_state_check.sh
 
       # rtl/snac_psx.v is a copy. The AmigaCD core owns it, and a shared file
       # with no control on it drifts silently -- both copies compile, both look

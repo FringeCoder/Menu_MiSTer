@@ -26,7 +26,7 @@ There is no SUITE route for this core and there does not need to be one.
 
 ---
 
-## M1 — `snac_state`'s word order is an unchecked cross-repo contract  [SIM]
+## M1 — `snac_state`'s word order is an unchecked cross-repo contract  [SIM] — [DONE 2026-09-15]
 
 `menu.sv:251` says it outright:
 
@@ -46,7 +46,21 @@ the source".
 Doing it needs the userspace side in view to write the expected order down, so
 it is blocked on having that repository to hand, not on difficulty.
 
-## M2 — Five of the eight SNAC bench checks are not falsified  [SIM]
+**Done 2026-09-15, with both repositories to hand.** The order is written down
+in `docs/snac-state-contract.md`: seven words, ids first because concatenation
+puts the first operand in the high bits and the stream sends the low word first.
+
+Each side checks itself against that table -- `snac_state_check.sh` here reads
+the `assign snac_state` operand list out of `menu.sv`, and the copy in AmigaCD
+reads the assignment order out of `snac_psx_poll()`. Neither check can see the
+other repository, which is the point: a change on either side that is not also a
+change to the table fails at the commit that made it, rather than on someone's
+hardware later.
+
+Falsified by reordering the packing: swapping `snac_id1` and `snac_id0` fails
+the check and prints both orders.
+
+## M2 — Five of the eight SNAC bench checks are not falsified  [SIM] — [DONE 2026-09-15]
 
 `rtl/sim/snac_psx/tb_snac_psx.sv` has eight checks. Three were confirmed to
 fail under a matching DUT mutation on 2026-09-13 — the GunCon axes gate, the
@@ -57,6 +71,20 @@ button) went green and were never shown to go red.
 A check that has never failed has not been shown to test anything. Mutate the
 DUT once per check and record the result, the way the three are recorded in the
 CI step's comment.
+
+**Done 2026-09-15.** All five, each against a plausible wrong implementation
+rather than arbitrary breakage, recorded in full in the CI step's comment:
+
+| mutation | fails |
+|---|---|
+| `id0 <= rx_byte[1]`, absence gate dropped | `absent id0: got ff want 00` |
+| `decode(rx_byte[2], rx_byte[3])` | `digital pad0: got 8803 want 0010` |
+| both ports commit into port 0's registers | `port1 id1: got 00 want 41` |
+| axes assembled `{5,6,7,8}` | `analog axes0: got 12345678 want 78563412` |
+| `pad0` assigned only when a pad is present | `unplugged pad0: got 0010 want 0000` |
+
+The last is the ST_DONE comment made executable -- "every branch below always
+assigns a fresh value" -- and only the unplug check catches it.
 
 ## M3 — The SNAC reader has no hardware verification on this core  [TITLE]
 
@@ -73,7 +101,7 @@ arbitration in `menu.sv:270-273`.
 Needs: a MiSTer, a SNAC adapter, a digital pad, a DualShock, and ideally a
 GunCon. Record what was tried and what was seen, including the negative results.
 
-## M4 — The user-port mux between SNAC and MT32-pi is untested  [SIM]
+## M4 — The user-port mux between SNAC and MT32-pi is untested  [SIM] — [DONE 2026-09-15]
 
 `menu.sv:268-273`. The two tenants collide on every pin, so the mux is
 "physics, not policy" as the comment says — but it is still four combinational
@@ -84,6 +112,26 @@ left driving a bus it no longer owns until its state machine notices.
 Cheap to bench, and the bench would be a small extension of the SNAC one.
 Ranked below M1 and M2 because a wrong answer here degrades to "MIDI is silent
 while SNAC is on", which is visible, rather than to a subtly wrong button map.
+
+**Done 2026-09-15**, as `rtl/sim/snac_psx/tb_snac_enable.sv` -- its own file,
+because `tb_snac_psx.sv` is vendored and editing it here would diverge the two
+copies. It compiles the vendored bench anyway to borrow its `psx_pad` model,
+with `-s` picking the top.
+
+It covers `snac_psx.v` rather than the four assigns in `menu.sv`: the module is
+what has state, and a bench that re-declared the assigns would be testing its own
+copy of them. Eleven checks -- the bus left idle while disabled and staying that
+way, the reader taking the bus on enable, **releasing it at once when enable
+drops mid-frame** and not resuming, coming back on re-enable, and the result
+registers all returning to default so a button held at the switch cannot stay
+pressed in the OSD.
+
+Falsified against five mutations. Worth recording why three of them initially
+were not: the clear checks passed against a reader that cleared nothing, because
+with no pad plugged in they compared defaults against defaults. The bench now
+holds a DualShock with X down and its sticks off centre, and waits for the reader
+to see both before switching away -- digital would not do, since a digital pad's
+axes read centre regardless.
 
 ## M5 — `rtl/cos.sv` is outside the syntax gate  [no code]
 
