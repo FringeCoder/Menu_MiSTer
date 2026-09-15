@@ -21,7 +21,8 @@ something there is genuinely broken, it is broken for every core.
 
 ## `rtl/snac_psx.v` is not canonical here
 
-It is copied from the AmigaCD core, which owns it. Fix a bug there and
+It is copied from `FringeCoder/AmigaCD`, the userspace repo, which owns it —
+not from the core, which carries a copy of its own. Fix a bug there and
 re-vendor; fixing it here means the two diverge and the next sync quietly
 reverts you. CI checks the copy against the sha256 in `rtl/snac_psx.vendor` and
 fails if it was edited in place.
@@ -32,7 +33,7 @@ fails if it was edited in place.
 ./snac_vendor_check.sh --stamp /path/to/amigacd # re-vendor and restamp
 ```
 
-Full procedure: `docs/snac-psx-vendoring.md` in the AmigaCD core.
+Full procedure: `rtl/README.md` in `FringeCoder/AmigaCD`.
 
 ## Working here
 

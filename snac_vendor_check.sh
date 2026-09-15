@@ -2,7 +2,8 @@
 #
 # Check rtl/snac_psx.v against the canonical copy, or refresh the stamp.
 #
-# rtl/snac_psx.v is copied from the AmigaCD core, which owns it. MiSTer core
+# rtl/snac_psx.v is copied from the AmigaCD userspace repo, which owns it (the
+# AmigaCD core carries a copy too, not the original). MiSTer core
 # repositories are self-contained Quartus projects with no submodule or package
 # step anywhere in the toolchain, so copying is the platform's convention; the
 # cost of that convention is drift, and this is the control for it.

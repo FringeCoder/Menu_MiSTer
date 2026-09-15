@@ -157,8 +157,8 @@ the other repository.
 The deliberate choice is a hard local check over a cross-repo check that
 degrades to "skipped" when a secret is missing. The upgrade, if the token ever
 exists, is a second `actions/checkout` with `repository:` and a diff; the script
-already implements that comparison. See `docs/snac-psx-vendoring.md` in the
-AmigaCD core.
+already implements that comparison. See `rtl/README.md` in
+`FringeCoder/AmigaCD`.
 
 ---
 

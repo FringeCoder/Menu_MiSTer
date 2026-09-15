@@ -3,18 +3,26 @@
 # commit; the sha256 here covers the module only, since that is the file
 # that gets synthesised.
 #
-# This module is NOT canonical here. It is copied from the AmigaCD core, which
-# owns it. Do not fix a bug in the copy: fix it there, then re-vendor, or the
-# two silently diverge and the next sync quietly reverts you.
+# This module is NOT canonical here. It is copied from the AmigaCD USERSPACE
+# repo, which owns it -- see rtl/README.md there, and the header of the module
+# itself. Do not fix a bug in the copy: fix it there, then re-vendor, or the
+# copies silently diverge and the next sync quietly reverts you.
+#
+# The repo/commit below named FringeCoder/Minimig-AGA-cd32-cdtv-native-akiko
+# until 2026-09-15. That was the AmigaCD *core*, which carries a copy of this
+# module, not its home: someone ran --stamp against a core checkout and the
+# script writes whatever HEAD it is pointed at. The sha256 never changed, so
+# nothing had drifted -- the pointer was simply to the wrong repository. It now
+# names the commit in FringeCoder/AmigaCD whose blob hashes to the sha256 below.
 #
 # CI checks the local file against sha256 below. If that step fails, either the
 # copy was edited in place (don't) or a re-vendor updated the file and not this
-# stamp. Procedure: docs/snac-psx-vendoring.md in the AmigaCD repo.
+# stamp. Procedure: rtl/README.md in the FringeCoder/AmigaCD repo.
 #
 # Refresh with: ./snac_vendor_check.sh --stamp /path/to/amigacd-checkout
 
-repo   = FringeCoder/Minimig-AGA-cd32-cdtv-native-akiko
-commit = e8c7f73f9f539c0ec3e35fb09d80a61f54c24c4d
+repo   = FringeCoder/AmigaCD
+commit = 0787441170963838f44368fb91bcaeede2f620be
 path   = rtl/snac_psx.v
 sha256 = adbfcbec41aa899289cf43196084874745b63e74870336b11b698a029827f47e
 vendored = 2026-09-13
