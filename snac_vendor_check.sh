@@ -2,7 +2,8 @@
 #
 # Check rtl/snac_psx.v against the canonical copy, or refresh the stamp.
 #
-# rtl/snac_psx.v is copied from the AmigaCD core, which owns it. MiSTer core
+# rtl/snac_psx.v is copied from the AmigaCD userspace repo, which owns it (the
+# AmigaCD core carries a copy too, not the original). MiSTer core
 # repositories are self-contained Quartus projects with no submodule or package
 # step anywhere in the toolchain, so copying is the platform's convention; the
 # cost of that convention is drift, and this is the control for it.
@@ -51,13 +52,41 @@ CANON="${1:-}"
 if [ "$STAMP" = 1 ]; then
 	[ -n "$CANON" ] || { echo "error: --stamp needs a path to a $WANT_REPO checkout" >&2; exit 1; }
 	[ -f "$CANON/$CANON_PATH" ] || { echo "error: $CANON/$CANON_PATH not found" >&2; exit 1; }
+	# Refuse a checkout that is not the repo the stamp names. --stamp used to
+	# write whatever HEAD it was pointed at with no check on WHERE that HEAD
+	# was, and that is how this stamp came to record a commit in the AmigaCD
+	# CORE for months: the sha256 matched throughout, so nothing ever failed --
+	# the stamp simply named a repo that would have been re-vendored FROM rather
+	# than the one a fix lands in.
+	#
+	# Matched on the TAIL of the URL, not as a substring. A substring test looks
+	# right and is not: FringeCoder/AmigaCD is a prefix of
+	# FringeCoder/AmigaCD_MiSTer, so `case $ORIGIN in *$WANT_REPO*)` would wave
+	# through a checkout of the core -- precisely what this rejects.
+	ORIGIN=$(git -C "$CANON" remote get-url origin 2>/dev/null || echo "")
+	ORIGIN_SLUG=${ORIGIN%.git}; ORIGIN_SLUG=${ORIGIN_SLUG%/}
+	ORIGIN_SLUG=$(printf '%s' "$ORIGIN_SLUG" | sed -e 's#^.*[:/]\([^:/][^:/]*/[^/][^/]*\)$#\1#')
+	if [ -z "$ORIGIN" ]; then
+		echo "warning: $CANON has no origin remote; cannot confirm it is $WANT_REPO" >&2
+	elif [ "${ORIGIN_SLUG,,}" != "${WANT_REPO,,}" ]; then
+		echo "error: $CANON is not a $WANT_REPO checkout (origin: $ORIGIN)." >&2
+		echo "       Point --stamp at the repo that OWNS the module, not at another copy." >&2
+		exit 1
+	fi
+
 	cp "$CANON/$CANON_PATH" "$MODULE"
 	if [ -f "$CANON/rtl/sim/snac_psx/tb_snac_psx.sv" ]; then
 		mkdir -p "$(dirname "$BENCH")"
 		cp "$CANON/rtl/sim/snac_psx/tb_snac_psx.sv" "$BENCH"
 	fi
 	NEW_SHA=$(sha256sum "$MODULE" | cut -d' ' -f1)
-	NEW_COMMIT=$(git -C "$CANON" rev-parse HEAD 2>/dev/null || echo "unknown")
+	# The commit that last touched THE FILE, not the checkout's HEAD. HEAD is
+	# whatever the canonical repo happened to be on that day -- usually a commit
+	# that did not touch this module at all -- and the one question the stamp has
+	# to answer during a drift investigation is "which change am I diffing
+	# against". The sha256 pins the bytes; this pins the change that produced them.
+	NEW_COMMIT=$(git -C "$CANON" log -1 --format=%H -- "$CANON_PATH" 2>/dev/null || echo "")
+	[ -n "$NEW_COMMIT" ] || NEW_COMMIT=$(git -C "$CANON" rev-parse HEAD 2>/dev/null || echo "unknown")
 	sed -i "s/^sha256 .*/sha256 = $NEW_SHA/; s/^commit .*/commit = $NEW_COMMIT/; s/^vendored .*/vendored = $(date -u +%Y-%m-%d)/" "$VENDOR"
 	echo "re-vendored from $CANON"
 	echo "  commit $NEW_COMMIT"

@@ -150,15 +150,21 @@ gains support, and delete the exclusion then rather than leaving it.
 
 `snac_vendor_check.sh` in CI checks `rtl/snac_psx.v` against the sha256 in
 `rtl/snac_psx.vendor`. That catches the copy being edited here. It does **not**
-catch the canonical copy in the AmigaCD core having moved — for that the script
-needs a path to a checkout, which CI cannot get without a token configured for
-the other repository.
+catch the canonical copy in `FringeCoder/AmigaCD` having moved — for that the
+script needs a path to a checkout, which CI cannot get without a token
+configured for the other repository.
+
+**This is not hypothetical, and the evidence arrived on 2026-09-15.** The same
+gap in the other direction — the AmigaCD repo's copies of the core's save state
+modules — let `ss_ctrl.v` there sit two commits behind what the core built, with
+every repository's CI green throughout. Nothing here has drifted yet; the point
+is that nothing here would say so if it had.
 
 The deliberate choice is a hard local check over a cross-repo check that
 degrades to "skipped" when a secret is missing. The upgrade, if the token ever
 exists, is a second `actions/checkout` with `repository:` and a diff; the script
-already implements that comparison. See `docs/snac-psx-vendoring.md` in the
-AmigaCD core.
+already implements that comparison. See `rtl/README.md` in
+`FringeCoder/AmigaCD`.
 
 ---
 
