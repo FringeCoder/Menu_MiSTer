@@ -166,6 +166,24 @@ exists, is a second `actions/checkout` with `repository:` and a diff; the script
 already implements that comparison. See `rtl/README.md` in
 `FringeCoder/AmigaCD`.
 
+**Checked by hand on 2026-09-17**, the first time all three repositories were on
+one disk, which is the only way this comparison can happen at all:
+
+    ./snac_vendor_check.sh /path/to/AmigaCD
+    OK   rtl/snac_psx.v matches the vendor stamp
+    OK   identical to the canonical copy in /path/to/AmigaCD
+
+No drift. The same check run from the AmigaCD core repo agrees, and
+`snac_psx.v` is byte-identical across all three copies. The core's
+`core_rtl_vendor_check.sh` was run against a real checkout at the same time and
+found its ten files identical too, including the two that had drifted on
+2026-09-15.
+
+A measurement with a date on it, not a gate: it says nothing about any moment
+after it. Run it again the next time the repositories are together -- it is the
+cheapest check available, and the only one that can see the canonical side
+move.
+
 ---
 
 ## M7 — menu.rbf reaches the MiSTer by hand, and update_all overwrites it  [no code]
@@ -228,6 +246,18 @@ set of deployment gaps is written up in the AmigaCD repo as
 5. **M5, M6, M7** — recorded so they are not rediscovered as bugs. None is work.
    M7 is the one to reread before debugging a SNAC pad that has stopped
    answering in the boot menu, since an `update_all` is the likeliest cause.
+
+**State as of 2026-09-17.** M1, M2, M4 and M7 are done and marked so in their
+headings; M5 and M6 are recorded non-work. **M3 is the only open item, and it
+needs hardware.** So there is nothing on this list to start without a MiSTer in
+front of you, which is worth saying plainly rather than leaving a reader to
+derive it from six headings.
+
+The sibling list, `docs/core-accuracy-todo.md` in the core repo, had the opposite
+problem on the same day: items resolved in their bodies still ranked as open,
+which sent a reader at a closed item first. The rule that came out of it applies
+here too -- **a heading's marker and the ordering move in the same commit as the
+body that resolves the item.**
 
 ## What is not on this list
 
