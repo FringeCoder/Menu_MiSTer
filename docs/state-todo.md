@@ -198,7 +198,21 @@ core's CONF_STR name and this core calls itself MENU. And SW[1] on the
 DE10-Nano must be OFF — it hands three user-port pins to HDMI audio and the pad
 never answers, with no error.
 
-No action here; this is recorded so it is not rediscovered as a bug. The full
+**Actioned 2026-09-17, in `FringeCoder/AmigaCD`.** `scripts/deploy-menu.sh`
+there sends this core, keeps the `menu_snac.rbf` spare automatically, and adds
+the part the two hand commands never had: `--check`, which compares the live
+file against the spare and says whether `update_all` took it. Five verdicts, not
+two -- matching, taken, no spare (a future update would be unrecoverable), no
+live (the machine will not boot to a menu), nothing deployed yet -- because
+collapsing them puts back the ambiguity the whole thing exists to remove. The
+verdict has a test, `tests/test_deploy_menu_check.sh`, falsified against four
+mutations; the one that matters makes a clobbered pair read as `ok`.
+
+The copy goes through a hidden transit name and is renamed into place, same as
+that repository's `deploy-core.sh`, for a sharper reason: a truncated game core
+will not load, a truncated `menu.rbf` is the thing that boots.
+
+What follows is still true and is still the reason any of it is needed. The full
 set of deployment gaps is written up in the AmigaCD repo as
 `docs/deployment-gaps.md`.
 
