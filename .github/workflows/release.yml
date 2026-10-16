@@ -1,0 +1,177 @@
+# Publish a GitHub release of this Menu core, with a changelog. ON DEMAND ONLY.
+#
+# Started by hand from Actions -> release -> Run workflow, and by nothing else:
+# workflow_dispatch is its only trigger, so no push or pull request ever
+# publishes. A release is a promise to whoever downloads it.
+#
+# The .rbf is not built here -- Quartus is not in CI. It is the fit you commit
+# as releases/menu_snac_YYYYMMDD.rbf. Not menu_YYYYMMDD.rbf: that is upstream's
+# own naming, and releases/ already holds a dozen of Sorgelig's, so "the newest
+# menu_*.rbf" could be an upstream build without the SNAC reader in it.
+#
+#   guard    default branch only; the newest releases/menu_snac_*.rbf; the tag
+#            (v<that date> unless given); refuses a tag that exists, and an rbf
+#            the previous release already shipped
+#   ci       rtl-sim.yml itself, called: the syntax gate, the vendor stamp and
+#            the SNAC benches must pass, or nothing is published
+#   publish  changelog, then the tag and the release with menu.rbf attached
+#
+# FringeCoder/AmigaCD_MiSTer's release bundles the latest release published
+# here, so this is also what reaches the AmigaCD package. docs/releasing.md.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag, e.g. v20261016. Empty: v<date of the newest releases/menu_snac_*.rbf>. Must not exist yet.'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Mark as a pre-release (the AmigaCD package will not pick it up)'
+        type: boolean
+        default: false
+      notes:
+        description: 'Optional text shown above the generated changelog'
+        required: false
+        default: ''
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RBF_PREFIX: menu_snac_
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      rbf: ${{ steps.pick.outputs.rbf }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Only from the default branch
+        env:
+          REF: ${{ github.ref_name }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$REF" != "$DEFAULT" ]; then
+            echo "::error::Releases are made from $DEFAULT only; this run is on $REF."
+            exit 1
+          fi
+
+      # Inputs reach the shell through env only, so they cannot inject.
+      - name: Pick the core and the tag
+        id: pick
+        env:
+          TAG_IN: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # Dated names sort by date, and a glob expands sorted: the last match
+          # is the newest.
+          rbf=""
+          for f in releases/"$RBF_PREFIX"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].rbf; do
+            [ -e "$f" ] && rbf="${f#releases/}"
+          done
+          if [ -z "$rbf" ]; then
+            echo "::error::No releases/${RBF_PREFIX}YYYYMMDD.rbf is committed. Commit the fit first."
+            exit 1
+          fi
+          # A Git LFS pointer or a truncated copy is a few hundred bytes; a real
+          # bitstream is megabytes.
+          size="$(stat -c %s "releases/$rbf")"
+          if [ "$size" -lt 500000 ]; then
+            echo "::error::releases/$rbf is only $size bytes; that is not a fitted core."
+            exit 1
+          fi
+          date="${rbf#"$RBF_PREFIX"}"; date="${date%.rbf}"
+          tag="${TAG_IN:-v$date}"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9A-Za-z._-]+$'; then
+            echo "::error::Tag '$tag' must start with v and use only letters, digits, . _ -"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::Tag $tag already exists. Pass another, e.g. $tag.1"
+            exit 1
+          fi
+          # Re-releasing the same bitstream under a new tag would read as an
+          # update and be none.
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+          if [ -n "$prev" ] && git cat-file -e "$prev:releases/$rbf" 2>/dev/null; then
+            echo "::error::releases/$rbf was already in $prev. Commit a new fit to release."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "rbf=$rbf" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag: releases/$rbf ($size bytes), previous ${prev:-none}"
+
+  ci:
+    needs: guard
+    uses: ./.github/workflows/rtl-sim.yml
+
+  publish:
+    needs: [guard, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # menu.rbf is the name it must have on the card; the dated copy is kept
+      # beside it so the build can be told apart once downloaded.
+      - name: Stage release files
+        env:
+          RBF: ${{ needs.guard.outputs.rbf }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "releases/$RBF" dist/menu.rbf
+          cp "releases/$RBF" "dist/$RBF"
+          (cd dist && sha256sum menu.rbf "$RBF" > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Write the changelog
+        env:
+          TAG: ${{ needs.guard.outputs.tag }}
+          RBF: ${{ needs.guard.outputs.rbf }}
+          NOTES: ${{ inputs.notes }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+          # shellcheck disable=SC2016  # the backticks are Markdown, not expansions
+          {
+            if [ -n "$NOTES" ]; then printf '%s\n\n' "$NOTES"; fi
+            python3 scripts/release-notes.py "$prev" "$GITHUB_SHA" --repo "$REPO"
+            printf '\n### Install\n\n'
+            printf 'Copy `menu.rbf` to `/media/fat/menu.rbf`. Keep the old one as a spare: '
+            printf 'a menu core that does not boot leaves the MiSTer with no menu.\n\n'
+            printf 'Core: `releases/%s`, from %s.\n' "$RBF" "$GITHUB_SHA"
+          } > dist/NOTES.md
+          cat dist/NOTES.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.guard.outputs.tag }}
+          RBF: ${{ needs.guard.outputs.rbf }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Menu (SNAC) $TAG" \
+            --notes-file dist/NOTES.md \
+            "${args[@]}" \
+            dist/menu.rbf "dist/$RBF" dist/SHA256SUMS
