@@ -1,0 +1,171 @@
+# Publish a GitHub release of this Menu core, with a changelog. ON DEMAND ONLY.
+#
+# Started by hand from Actions -> release -> Run workflow, and by nothing else:
+# workflow_dispatch is its only trigger, so no push or pull request ever
+# publishes. A release is a promise to whoever downloads it.
+#
+# The core is fitted here, by fit.yml, from the commit being released -- not a
+# file someone committed, so what is published is exactly what the source says.
+#
+#   guard    default branch only; the tag (v<today, UTC> unless given),
+#            refused if it exists; refused if nothing was committed since the
+#            previous release
+#   ci       rtl-sim.yml: the syntax gate, the vendor stamp, the SNAC benches
+#   fit      fit.yml with several seeds and require_timing: no seed with both
+#            slacks positive, no release
+#   publish  changelog, then the tag and the release with menu.rbf attached
+#
+# FringeCoder/AmigaCD_MiSTer's release bundles the latest release published
+# here into the AmigaCD package. docs/releasing.md has the how-to.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag, e.g. v20261016. Empty: v<today, UTC>. Must not exist yet.'
+        required: false
+        default: ''
+      seeds:
+        description: 'Placement seeds to fit, in parallel; the best that closes timing is released'
+        required: false
+        default: '1,2,3,4'
+      prerelease:
+        description: 'Mark as a pre-release (the AmigaCD package will not pick it up)'
+        type: boolean
+        default: false
+      notes:
+        description: 'Optional text shown above the generated changelog'
+        required: false
+        default: ''
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Only from the default branch
+        env:
+          REF: ${{ github.ref_name }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$REF" != "$DEFAULT" ]; then
+            echo "::error::Releases are made from $DEFAULT only; this run is on $REF."
+            exit 1
+          fi
+
+      # Inputs reach the shell through env only, so they cannot inject.
+      - name: Work out the tag
+        id: tag
+        env:
+          TAG_IN: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${TAG_IN:-v$(date -u +%Y%m%d)}"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9A-Za-z._-]+$'; then
+            echo "::error::Tag '$tag' must start with v and use only letters, digits, . _ -"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::Tag $tag already exists. Pass another, e.g. $tag.1"
+            exit 1
+          fi
+          # The same commit again would be a new tag on an old build.
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+          if [ -n "$prev" ] && [ "$(git rev-parse "$prev^{commit}")" = "$(git rev-parse HEAD)" ]; then
+            echo "::error::Nothing has been committed since $prev."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag from $(git rev-parse --short HEAD), previous ${prev:-none}"
+
+  ci:
+    needs: guard
+    uses: ./.github/workflows/rtl-sim.yml
+
+  fit:
+    needs: guard
+    uses: ./.github/workflows/fit.yml
+    with:
+      seeds: ${{ inputs.seeds }}
+      require_timing: true
+
+  publish:
+    needs: [guard, ci, fit]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the fitted core
+        uses: actions/download-artifact@v4
+        with:
+          name: core
+          path: core
+
+      # menu.rbf is the name it must have on the card; the dated copy is kept
+      # beside it so the build can be told apart once downloaded.
+      - name: Stage release files
+        env:
+          RBF: ${{ needs.fit.outputs.rbf }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "core/$RBF" dist/menu.rbf
+          cp "core/$RBF" "dist/$RBF"
+          (cd dist && sha256sum menu.rbf "$RBF" > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Write the changelog
+        env:
+          NOTES: ${{ inputs.notes }}
+          REPO: ${{ github.repository }}
+          SEED: ${{ needs.fit.outputs.seed }}
+          SETUP: ${{ needs.fit.outputs.setup }}
+          HOLD: ${{ needs.fit.outputs.hold }}
+        run: |
+          set -euo pipefail
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+          # shellcheck disable=SC2016  # the backticks are Markdown, not expansions
+          {
+            if [ -n "$NOTES" ]; then printf '%s\n\n' "$NOTES"; fi
+            python3 scripts/release-notes.py "$prev" "$GITHUB_SHA" --repo "$REPO"
+            printf '\n### Install\n\n'
+            printf 'Copy `menu.rbf` to `/media/fat/menu.rbf`. Keep the old one as a spare: '
+            printf 'a menu core that does not boot leaves the MiSTer with no menu.\n\n'
+            printf 'Fitted in CI from %s with Quartus 17.0.2 Lite, seed %s: worst setup slack %s ns, hold %s ns.\n' \
+              "$GITHUB_SHA" "$SEED" "$SETUP" "$HOLD"
+          } > dist/NOTES.md
+          cat dist/NOTES.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.guard.outputs.tag }}
+          RBF: ${{ needs.fit.outputs.rbf }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Menu (SNAC) $TAG" \
+            --notes-file dist/NOTES.md \
+            "${args[@]}" \
+            dist/menu.rbf "dist/$RBF" dist/SHA256SUMS
